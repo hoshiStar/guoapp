@@ -183,7 +183,15 @@ jobs:
       - name: Configure Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
       - run: sudo gem install cocoapods
-      - run: python scripts/build_ios.py ${{ matrix.arguments }}
+      - name: Build iOS
+        run: |
+          set +e
+          python scripts/build_ios.py ${{ matrix.arguments }} 2>&1 | tee /tmp/ios-build-log.txt
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            tail -n 25 /tmp/ios-build-log.txt | sed 's/^/::error::/'
+          fi
+          exit "$status"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.edition }}-ios
