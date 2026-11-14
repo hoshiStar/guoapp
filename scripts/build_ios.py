@@ -7,6 +7,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 from app_build import BuildVariant, add_variant_argument
@@ -67,6 +68,17 @@ def build_core(simulator=False, variant=BuildVariant()):
     run(arguments + ['-output', str(framework)])
 
 
+def assert_ipa_payload(ipa, application):
+    """IPA 顶层必须是 Payload/<app>.app，否则安装工具会报找不到 Payload。"""
+    with zipfile.ZipFile(ipa) as archive:
+        names = archive.namelist()
+    prefix = 'Payload/' + application.name + '/'
+    if not any(name.startswith(prefix) for name in names):
+        raise SystemExit(f'IPA 结构错误：{ipa.name} 缺少 {prefix} 目录。')
+    if (prefix + 'Info.plist') not in names:
+        raise SystemExit(f'IPA 结构错误：{ipa.name} 缺少 {prefix}Info.plist。')
+
+
 def main():
     parser = argparse.ArgumentParser(description='构建红果鉴 / 真果鉴 iOS 核心和应用')
     parser.add_argument('--core-only', action='store_true')
@@ -116,8 +128,11 @@ def main():
         ipa = output / f'{variant.slug}-{version}-ios-unsigned.ipa'
         if ipa.exists():
             ipa.unlink()
-        run(['ditto', '-c', '-k', '--sequesterRsrc', str(payload), str(ipa)])
+        # ditto 不加 --keepParent 时只会压 Payload 的内容（Runner.app/...），
+        # 把 Payload 这层吃掉，安装工具会因找不到 Payload/ 而拒绝安装。
+        run(['ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', str(payload), str(ipa)])
         shutil.rmtree(payload)
+        assert_ipa_payload(ipa, application)
         artifacts.append(ipa)
     if not artifacts:
         raise SystemExit('未生成 iOS 安装包。')
