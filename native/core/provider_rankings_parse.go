@@ -162,10 +162,20 @@ func parseHuangguoRanking(body string, board rankingBoard) (rankingPage, error) 
 			seen, previous := map[string]bool{}, 0
 			for _, item := range graph.Items {
 				parsed, err := url.Parse(item.URL)
-				if err != nil || !strings.HasPrefix(parsed.Path, "/detail/") {
+				if err != nil {
 					return rankingPage{}, failure
 				}
-				id := strings.TrimSuffix(strings.TrimPrefix(parsed.Path, "/detail/"), "/")
+				// 站点 2026-11 起榜单条目的 url 由 /detail/<id>/ 改为 /video/<id>/。
+				prefix := ""
+				switch {
+				case strings.HasPrefix(parsed.Path, "/detail/"):
+					prefix = "/detail/"
+				case strings.HasPrefix(parsed.Path, "/video/"):
+					prefix = "/video/"
+				default:
+					return rankingPage{}, failure
+				}
+				id := strings.TrimSuffix(strings.TrimPrefix(parsed.Path, prefix), "/")
 				if !rankingSourceID.MatchString(id) || strings.TrimSpace(item.Name) == "" || item.Position <= previous || seen[id] {
 					return rankingPage{}, failure
 				}

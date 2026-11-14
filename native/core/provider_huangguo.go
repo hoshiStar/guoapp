@@ -44,7 +44,7 @@ var (
 	huangguoAISlugs     = []string{"recommend", "newest", "ai-duanju", "ai-manju", "ai-huanlian", "ai-mogai", "ranks/hot"}
 	huangguoAITypeNames = map[string]string{"recommend": "精选推荐", "newest": "最近上新", "ai-duanju": "AI成人短剧", "ai-manju": "AI成人漫剧", "ai-huanlian": "AI换脸", "ai-mogai": "AI魔改", "ranks/hot": "排行榜"}
 
-	reDetailHref      = regexp.MustCompile(`(?is)<a\b[^>]*href=["']([^"']*/detail/([^"'/?#]+)[^"']*)["'][^>]*>.*?</a>`)
+	reDetailHref      = regexp.MustCompile(`(?is)<a\b[^>]*href=["']([^"']*/(?:detail|video)/([^"'/?#]+)[^"']*)["'][^>]*>.*?</a>`)
 	reDramaCardStart  = regexp.MustCompile(`(?is)<div\b[^>]*class=["'][^"']*\bhg-drama-card\b[^"']*["'][^>]*>`)
 	reVideoCard       = regexp.MustCompile(`(?is)<article\b[^>]*class=["'][^"']*\bvideo-card\b[^"']*["'][^>]*>.*?</article>`)
 	reAnyArticle      = regexp.MustCompile(`(?is)<article\b[^>]*>.*?</article>`)
@@ -1021,6 +1021,8 @@ func huangguoVideoSourceID(href string) (path, sourceID string) {
 	return "", ""
 }
 
+// detailIDFromString 从剧集链接里取剧集编号。站点 2026-11 起把详情路径从
+// /detail/<id>/ 换成了 /video/<id>/，两种形态都要认。
 func detailIDFromString(s string) string {
 	u, err := url.Parse(html.UnescapeString(s))
 	path := s
@@ -1029,7 +1031,7 @@ func detailIDFromString(s string) string {
 	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	for i := 0; i+1 < len(parts); i++ {
-		if parts[i] == "detail" {
+		if parts[i] == "detail" || parts[i] == "video" {
 			return cleanID(parts[i+1])
 		}
 	}
@@ -1283,12 +1285,17 @@ func extractClosestAttr(raw string, start, end int, names ...string) string {
 }
 
 func titleNearDetail(raw, sourceID string) string {
-	needle := "/detail/" + sourceID
-	idx := strings.Index(raw, needle)
-	if idx < 0 {
-		return ""
+	for _, prefix := range []string{"/detail/", "/video/"} {
+		needle := prefix + sourceID
+		idx := strings.Index(raw, needle)
+		if idx < 0 {
+			continue
+		}
+		if title := extractByClassText(contextBlock(raw, idx, idx+len(needle), 1800), "hg-drama-card__title"); title != "" {
+			return title
+		}
 	}
-	return extractByClassText(contextBlock(raw, idx, idx+len(needle), 1800), "hg-drama-card__title")
+	return ""
 }
 
 func resolveProviderURL(baseURL, ref string) string {
