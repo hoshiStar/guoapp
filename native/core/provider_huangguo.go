@@ -252,13 +252,32 @@ func (d *Downloader) fetchHuangguoAIChapters(ctx context.Context, sourceID strin
 	return drama.DisplayTitle(), chapters, err
 }
 
+// fetchHuangguoAIDetail 优先走站点的加密内容接口（2026-11 起播放地址只在那里下发），
+// 接口不可用时退回旧的 HTML 抓取路径。
 func (d *Downloader) fetchHuangguoAIDetail(ctx context.Context, sourceID string) (Drama, []Chapter, error) {
+	drama, chapters, err := d.fetchHuangguoEdgeDetail(ctx, sourceID)
+	if err == nil && len(chapters) > 0 {
+		return drama, chapters, nil
+	}
+	edgeErr := err
+	drama, chapters, htmlErr := d.fetchHuangguoAIHTMLDetail(ctx, sourceID)
+	if htmlErr == nil && len(chapters) > 0 {
+		return drama, chapters, nil
+	}
+	if edgeErr != nil {
+		return drama, chapters, edgeErr
+	}
+	return drama, chapters, htmlErr
+}
+
+func (d *Downloader) fetchHuangguoAIHTMLDetail(ctx context.Context, sourceID string) (Drama, []Chapter, error) {
 	sourceID = strings.Trim(strings.TrimSpace(sourceID), "/")
 	sourceID = strings.TrimPrefix(sourceID, "detail/")
 	if sourceID == "" {
 		return Drama{}, nil, fmt.Errorf("empty huangguoai sourceID")
 	}
-	detailURL := strings.TrimRight(huangguoAIBaseURL, "/") + "/detail/" + url.PathEscape(sourceID) + "/"
+	slug := firstNonEmpty(huangguoEdgeVideoID(sourceID), sourceID)
+	detailURL := strings.TrimRight(huangguoAIBaseURL, "/") + "/video/" + url.PathEscape(slug) + "/"
 	body, err := d.fetchProviderText(ctx, detailURL, huangguoAIBaseURL+"/")
 	if err != nil {
 		return Drama{}, nil, err

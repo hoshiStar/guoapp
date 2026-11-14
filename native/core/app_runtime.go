@@ -72,6 +72,8 @@ type Downloader struct {
 	legacy                *legacyAPIClient
 	previewMu             sync.Mutex
 	previewSessions       map[string]*huangguoPreviewSession
+	huangguoEdgeOnce      sync.Once
+	huangguoEdgeClient    *huangguoEdgeClient
 }
 
 func defaultConfig() Config { return Config{MaxPagesPerSort: 50, PageSize: 30, Retries: 2} }

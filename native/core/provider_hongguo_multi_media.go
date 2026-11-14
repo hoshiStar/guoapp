@@ -206,7 +206,7 @@ func (downloader *Downloader) hongguoPlayerPost(ctx context.Context, videoID str
 		return nil, fmt.Errorf("红果 App 接口 HTTP %d", response.StatusCode)
 	}
 	if len(content) == 0 {
-		return nil, errors.New("红果 App 接口未返回有效数据")
+		return nil, errors.New("红果 App 接口返回空响应：上游按出口网络或设备身份拦截，不是本机设置问题")
 	}
 	var result map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(content))

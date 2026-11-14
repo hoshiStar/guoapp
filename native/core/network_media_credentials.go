@@ -15,6 +15,7 @@ type providerMediaCredentials struct {
 	referer   string
 	userAgent string
 	expires   time.Time
+	headers   map[string]string // 站点下发的固定请求头（如 CDN 鉴权），对所有请求生效
 }
 
 type providerMediaCredentialsKey struct{}
@@ -37,6 +38,9 @@ func providerMediaOrigin(address *url.URL) string {
 
 func (credentials *providerMediaCredentials) apply(request *http.Request) error {
 	request.Header.Del("Cookie")
+	for name, value := range credentials.headers {
+		request.Header.Set(name, value)
+	}
 	if credentials.userAgent != "" {
 		request.Header.Set("User-Agent", credentials.userAgent)
 	}

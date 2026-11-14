@@ -225,7 +225,9 @@ func (downloader *Downloader) hongguoAppRequest(ctx context.Context, method, pat
 			continue
 		}
 		if len(content) == 0 || len(content) > providerMaxBodyBytes {
-			return nil, errors.New("红果 App 接口未返回有效数据")
+			// 服务端对不放行的出口/身份统一回 HTTP 200 + 空 body（不带错误码），
+			// 客户端无从重试成功；文案要说明这是上游拦截，不是本机配置错误。
+			return nil, errors.New("红果 App 接口返回空响应：上游按出口网络或设备身份拦截，不是本机设置问题")
 		}
 		var result map[string]any
 		decoder := json.NewDecoder(bytes.NewReader(content))
