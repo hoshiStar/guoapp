@@ -2,7 +2,7 @@
 
 > ⚠️ **免责声明**：本项目源码来自网上大名鼎鼎的**鱼佬**（原作者）。我只是把它拿来打包、测试着玩，方便自己用，**不保证任何可用性，随时可能删库**。
 
-Flutter 多端独立短剧 / 影视应用，原名「短剧库 APP」。站源请求、解析、下载和播放均在设备上完成，不依赖自建服务。当前源码版本：**0.2.76+83**。
+Flutter 多端独立短剧 / 影视应用，原名「短剧库 APP」。站源请求、解析、下载和播放均在设备上完成，不依赖自建服务。当前源码版本：**0.2.77+84**。
 
 本轮在 0.2.50 基线上新增两个原生站源：**韩小圈**（`hanxiaoquan`，韩剧 / 韩国电影 / 韩国综艺 / 韩国动漫）与**鬼片网**（`guipian`，鬼片 / 电视剧 / 动漫）。默认可见站源顺序为：**红果 → 韩小圈 → 鬼片 → 青空**。
 
@@ -98,7 +98,7 @@ Flutter 多端独立短剧 / 影视应用，原名「短剧库 APP」。站源�
   - 玻璃面叠加饱和度提升（vibrancy 1.5×）与轻度模糊，容器色 `surfaceContainer @ 0.4`，轮廓为方向光高光描边（BloomStroke 简化移植），选中 pill 带内阴影，整体投影 10dp；
   - 玻璃渲染区相对胶囊形外扩 40dp 为折射提供真实背景采样，形状之外由着色器裁掉；
   - 运行环境不支持 `ImageFilter.shader`（非 Impeller 后端）或着色器加载失败时，自动回退到纯 Flutter 毛玻璃外观，功能不受影响。
-- **红果取流修复（服务端风控旧链路）**：旧 `video_model` 接口与五签名头已被风控（任何请求均返回空 body），改为移植 [hongguo-web](https://github.com/sunnysky123/hongguo-web) 的新链路：
+- **红果取流修复（服务端风控旧链路）**：旧 `video_model` 接口与五签名头已被风控（任何请求均返回空 body），改为移植 [hongguo-web](https://github.com/sunnysky123/hongguo-web) 的新链路（**已于 0.2.77+84 整体回退**）：
   - `POST /novel/player/multi_video_model/v1/`，完整合成真机设备参数（28 字段保序）与 python 风格 URL 编码；
   - 六签名头（X-Gorgon / X-Khronos / X-Ladon / X-Argus / X-Helios / X-Medusa）以纯 Go 重写（`native/core/provider_hongguo_pure_sign.go`），含 RC4 变体、位旋转、md5 V3、hashF13、Feistel 与 AesV3，与 Node 参考实现逐项对拍一致；
   - 响应经 `fallback_api` 二次裸请求取媒体列表，`key_seed` 经双 SHA-512 派生 AES-128-CBC 密钥解密媒体地址；选流优先 H.264/HEVC 并校验 VOD 域名白名单。
@@ -133,7 +133,15 @@ Flutter 多端独立短剧 / 影视应用，原名「短剧库 APP」。站源�
 
 ### 红果备用取流通道修复（0.2.76+83）
 
-- **红果备用取流（djapi）TLS 握手失败修复**：红果取流三渠道（App / 网页 / 备用代理）中，备用代理 `djapi.999888456.xyz` 此前报 `tls: no application protocol` 而整体失败。根因为标准 HTTP 客户端对 HTTPS 自动协商 HTTP/2（ALPN），而该代理服务端不支持 h2 协商。现为其单独建立一条**禁用 HTTP/2 的取流通道**（空 `TLSNextProto` 关掉 h2 且不强制 ALPN，优雅回退 HTTP/1.1），红果在 App 接口被风控、网页无公开地址时，可经备用通道取得该集媒体与密钥。
+- **红果备用取流（djapi）TLS 握手失败修复**：红果取流三渠道（App / 网页 / 备用代理）中，备用代理 `djapi.999888456.xyz` 此前报 `tls: no application protocol` 而整体失败。根因为标准 HTTP 客户端对 HTTPS 自动协商 HTTP/2（ALPN），而该代理服务端不支持 h2 协商。现为其单独建立一条**禁用 HTTP/2 的取流通道**（空 `TLSNextProto` 关掉 h2 且不强制 ALPN，优雅回退 HTTP/1.1）。该代理服务端本身随后已不可用（任何 TLS 参数均握手失败），此通道仅作为历史回退保留。
+
+### 红果 App 取流修复：设备注册与单集 video_model（0.2.77+84）
+
+- **红果 App 通道恢复**：此前 App 通道对任何剧集都返回 HTTP 200 + 空 body，被判定为上游风控，实际根因是**从未向服务端注册设备身份**——请求里带的 `device_id` / `iid` 是每次现编的随机串，平台据此直接丢弃响应。现按真机流程先 `POST https://log.snssdk.com/service/2/device_register/`（不签名，只带 UA / Accept / Content-Type）换取真实 `device_id` / `install_id`，注册结果随目录状态持久化，进程重启后复用。
+- **取流端点改为单集 `video_model`**：旧的 `POST /novel/player/multi_video_model/v1/`（`video_platform=1024` + `fallback_api` 二次请求 + `key_seed` 解密）整条链路已失效，换成 `POST /novel/player/video_model/v1/`（`video_platform=3`，`need_all_video_definition`）一次返回 `video_list`，直接取 `main_url` / `backup_url` 与 `encrypt_info.spade_a` 的 CENC 密钥。
+- **空响应按设备轮换**：服务端对不放行的设备身份回 200 + 空 body，现视为「该身份被拒」，自动注册新设备身份重试（最多 3 次，同一身份 10 分钟内不再重复注册），用尽才报错。
+- **签名对齐上游**：X-Argus 的 protobuf 字段布局、`X-Ladon` 载荷（`<ts>-1611921764-<aid>`）与 `x-ss-stub`（SM3(MD5(body))）按现行客户端校正；请求参数精简为 20 个真机字段，不再附带 `ts` / `host_abi` / `pv_player` 等多余项。
+- **删除失效链路**：`provider_hongguo_multi_media.go`、`provider_hongguo_pure_sign.go` 及其测试（约 1600 行）随旧端点一并移除，红果取流不再依赖 `fallback_api` 与六签名头。
 
 ### 音量亮度映射实际设备、红果二级分类页修复（0.2.75+82）
 

@@ -30,10 +30,11 @@ type hongguoCatalogCursor struct {
 }
 
 type hongguoCatalogState struct {
-	Version   int                             `json:"version"`
-	DeviceID  string                          `json:"deviceId"`
-	InstallID string                          `json:"installId"`
-	Feeds     map[string]hongguoCatalogCursor `json:"feeds"`
+	Version    int                             `json:"version"`
+	DeviceID   string                          `json:"deviceId"`
+	InstallID  string                          `json:"installId"`
+	Registered bool                            `json:"registered,omitempty"`
+	Feeds      map[string]hongguoCatalogCursor `json:"feeds"`
 }
 
 type hongguoAppClient struct {
@@ -41,6 +42,7 @@ type hongguoAppClient struct {
 	catalogMu      sync.Mutex
 	baseURL        string
 	state          hongguoCatalogState
+	registrar      hongguoDeviceRegistrar
 	details        map[string]hongguoDetailEntry
 	pending        map[string]*hongguoDetailCall
 	searches       map[string]hongguoSearchEntry
@@ -130,18 +132,10 @@ func hongguoCatalogHasMore(state *hongguoCatalogState) bool {
 func (downloader *Downloader) hongguoAppRequest(ctx context.Context, method, path string, extra url.Values, payload any) (map[string]any, error) {
 	client := downloader.hongguoClient()
 	client.mu.Lock()
-	base, deviceID, installID := client.baseURL, client.state.DeviceID, client.state.InstallID
+	base := client.baseURL
 	client.mu.Unlock()
-	query := url.Values{
-		"aid": {"8662"}, "app_name": {"novelread"}, "version_code": {"73532"}, "version_name": {"7.3.5.32"},
-		"manifest_version_code": {"73532"}, "update_version_code": {"73532"}, "channel": {"update_64"},
-		"device_platform": {"android"}, "os": {"android"}, "ssmix": {"a"}, "device_type": {"25053RT47C"},
-		"device_brand": {"Redmi"}, "language": {"zh"}, "os_api": {"36"}, "os_version": {"16"},
-		"resolution": {"1280*2772"}, "dpi": {"520"}, "ac": {"wifi"}, "device_id": {deviceID}, "iid": {installID},
-	}
-	for key, values := range extra {
-		query[key] = append([]string(nil), values...)
-	}
+	comment, _ := ctx.Value(hongguoCommentKey{}).(bool)
+	signed := !comment
 	var body []byte
 	var err error
 	if payload != nil {
@@ -158,6 +152,7 @@ func (downloader *Downloader) hongguoAppRequest(ctx context.Context, method, pat
 		attempts = 3
 	}
 	var lastErr error
+	rotations := 0
 	for attempt := 0; attempt < attempts; attempt++ {
 		if attempt > 0 {
 			select {
@@ -165,6 +160,27 @@ func (downloader *Downloader) hongguoAppRequest(ctx context.Context, method, pat
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
+		}
+		client.mu.Lock()
+		deviceID, installID := client.state.DeviceID, client.state.InstallID
+		client.mu.Unlock()
+		if signed {
+			if err := client.registrar.ensure(ctx, downloader, ""); err != nil {
+				return nil, fmt.Errorf("红果设备注册失败：%w", err)
+			}
+			client.mu.Lock()
+			deviceID, installID = client.state.DeviceID, client.state.InstallID
+			client.mu.Unlock()
+		}
+		query := url.Values{
+			"aid": {"8662"}, "app_name": {"novelread"}, "version_code": {"73532"}, "version_name": {"7.3.5.32"},
+			"manifest_version_code": {"73532"}, "update_version_code": {"73532"}, "channel": {"update_64"},
+			"device_platform": {"android"}, "os": {"android"}, "ssmix": {"a"}, "device_type": {"25053RT47C"},
+			"device_brand": {"Redmi"}, "language": {"zh"}, "os_api": {"36"}, "os_version": {"16"},
+			"resolution": {"1280*2772"}, "dpi": {"520"}, "ac": {"wifi"}, "device_id": {deviceID}, "iid": {installID},
+		}
+		for key, values := range extra {
+			query[key] = append([]string(nil), values...)
 		}
 		request, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(base, "/")+path, bytes.NewReader(body))
 		if err != nil {
@@ -174,7 +190,6 @@ func (downloader *Downloader) hongguoAppRequest(ctx context.Context, method, pat
 		request.Header.Set("Accept", "application/json")
 		request.Header.Set("X-XS-From-Web", "0")
 		request.Header.Set("Sdk-Version", "2")
-		comment, _ := ctx.Value(hongguoCommentKey{}).(bool)
 		var commentNonce hongguoCommentNonce
 		var playerNonce hongguoPlayerNonce
 		if comment {
@@ -200,7 +215,7 @@ func (downloader *Downloader) hongguoAppRequest(ctx context.Context, method, pat
 			if comment {
 				signHongguoCommentRequest(prepared, commentNonce, now)
 			} else {
-				signHongguoPlayerRequest(prepared, body, now, installID, playerNonce)
+				signHongguoPlayerRequest(prepared, body, now, deviceID, playerNonce)
 			}
 		})
 		if err != nil {
@@ -225,9 +240,16 @@ func (downloader *Downloader) hongguoAppRequest(ctx context.Context, method, pat
 			continue
 		}
 		if len(content) == 0 || len(content) > providerMaxBodyBytes {
-			// 服务端对不放行的出口/身份统一回 HTTP 200 + 空 body（不带错误码），
-			// 客户端无从重试成功；文案要说明这是上游拦截，不是本机配置错误。
-			return nil, errors.New("红果 App 接口返回空响应：上游按出口网络或设备身份拦截，不是本机设置问题")
+			if signed && rotations < hongguoDeviceRotations {
+				if err := client.registrar.ensure(ctx, downloader, deviceID); err != nil {
+					lastErr = fmt.Errorf("红果设备注册失败：%w", err)
+					continue
+				}
+				rotations++
+				attempt--
+				continue
+			}
+			return nil, errors.New("红果 App 接口返回空响应：连续注册 3 个设备身份都被拒，稍后重试或换个网络")
 		}
 		var result map[string]any
 		decoder := json.NewDecoder(bytes.NewReader(content))

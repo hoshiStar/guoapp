@@ -21,6 +21,17 @@ func (transport sourceFixtureTransport) RoundTrip(request *http.Request) (*http.
 	return transport(request)
 }
 
+const hongguoDeviceRegisterBody = `{"device_id_str":"7000000000000001","install_id_str":"7000000000000002"}`
+
+func withHongguoDeviceRegister(transport sourceFixtureTransport) sourceFixtureTransport {
+	return func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path == "/service/2/device_register/" {
+			return sourceFixtureResponse(request, http.StatusOK, hongguoDeviceRegisterBody), nil
+		}
+		return transport(request)
+	}
+}
+
 func sourceFixtureResponse(request *http.Request, status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body)), ContentLength: int64(len(body)), Request: request}
 }
@@ -28,7 +39,7 @@ func sourceFixtureResponse(request *http.Request, status int, body string) *http
 func sourceFixtureDownloader(t *testing.T, transport sourceFixtureTransport) *Downloader {
 	t.Helper()
 	return &Downloader{cfg: Config{dataDir: t.TempDir(), Retries: 1, PageSize: 30, MaxPagesPerSort: 1},
-		client: &http.Client{Transport: transport}, limiter: newRequestLimiter(3, 0), providerHosts: map[string]string{}}
+		client: &http.Client{Transport: withHongguoDeviceRegister(transport)}, limiter: newRequestLimiter(3, 0), providerHosts: map[string]string{}}
 }
 
 func sourceFixtureEngine(t *testing.T, transport sourceFixtureTransport) *nativeEngine {
@@ -38,7 +49,7 @@ func sourceFixtureEngine(t *testing.T, transport sourceFixtureTransport) *native
 		t.Fatal(err)
 	}
 	t.Cleanup(engine.downloads.close)
-	engine.downloader.client.Transport = transport
+	engine.downloader.client.Transport = withHongguoDeviceRegister(transport)
 	engine.downloader.limiter = newRequestLimiter(3, 0)
 	engine.downloader.cfg.Retries = 1
 	return engine

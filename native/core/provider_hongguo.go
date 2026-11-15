@@ -243,7 +243,7 @@ func (d *Downloader) resolveHongguoMedia(ctx context.Context, task Task) (provid
 	if apiErr == nil {
 		return media, nil
 	}
-	return providerMedia{}, fmt.Errorf("红果取流失败（三条通道都没拿到播放地址，通常是上游按出口网络/设备身份放行，换个网络再试可能恢复）：App 通道 %v；网页通道 %v；备用通道 %w", publicError(nativeErr), publicError(pageErr), apiErr)
+	return providerMedia{}, fmt.Errorf("红果取流失败（三条通道都没拿到播放地址）：App 通道 %v；网页通道 %v；备用通道 %w", publicError(nativeErr), publicError(pageErr), apiErr)
 }
 
 func (d *Downloader) resolveHongguoWebMedia(ctx context.Context, seriesID, videoID string) (providerMedia, error) {

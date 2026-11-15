@@ -1,14 +1,36 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
+
+const hongguoVideoModelPath = "/novel/player/video_model/v1/"
+
+func (downloader *Downloader) resolveHongguoAppMedia(ctx context.Context, videoID string) (providerMedia, error) {
+	if !hongguoNumericID.MatchString(videoID) {
+		return providerMedia{}, errors.New("红果视频 ID 无效")
+	}
+	result, err := downloader.hongguoAppRequest(ctx, http.MethodPost, hongguoVideoModelPath, nil, map[string]any{
+		"video_id": videoID, "content_type": 1,
+		"biz_param": map[string]any{"need_all_video_definition": true, "video_platform": 3},
+	})
+	if err != nil {
+		return providerMedia{}, err
+	}
+	model, err := hongguoVideoModel(nestedMap(result, "data"))
+	if err != nil {
+		return providerMedia{}, err
+	}
+	return selectHongguoAppMedia(model)
+}
 
 // hongguoVideoModel 兼容三种下发结构：
 // 1) data.video_model 为对象；
